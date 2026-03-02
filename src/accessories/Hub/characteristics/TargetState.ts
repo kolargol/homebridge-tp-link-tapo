@@ -12,7 +12,7 @@ const characteristic: {
   set: CharacteristicSetHandler;
 } & AccessoryThisType = {
   get: async function (): Promise<Nullable<CharacteristicValue>> {
-    const deviceInfo = await this.tpLink.getInfo();
+    const deviceInfo = this.tpLink.getCachedInfo() ?? await this.tpLink.getInfo();
     return deviceInfo.in_alarm
       ? this.Characteristic.SecuritySystemTargetState.AWAY_ARM
       : this.Characteristic.SecuritySystemTargetState.DISARM;

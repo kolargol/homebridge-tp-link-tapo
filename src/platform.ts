@@ -124,7 +124,7 @@ export default class Platform implements DynamicPlatformPlugin {
     }
 
     try {
-      const tpLink = await new TPLink(ip, email, password, this.log).setup();
+      const tpLink = await new TPLink(ip, email, password, this.log, this.config.pollingInterval).setup();
       const deviceInfo = await tpLink.getInfo();
       if (Object.keys(deviceInfo || {}).length === 0) {
         this.log.error('Failed to get info about:', ip);

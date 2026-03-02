@@ -93,6 +93,24 @@ export default class HubAccessory extends Accessory {
       })
       .onGet(TargetState.get.bind(this))
       .onSet(TargetState.set.bind(this));
+
+    // Start background polling to keep cache warm and push updates to HomeKit
+    this.tpLink.startPolling((info) => {
+      try {
+        this.currentChar.updateValue(
+          info.in_alarm
+            ? this.Characteristic.SecuritySystemCurrentState.ALARM_TRIGGERED
+            : this.Characteristic.SecuritySystemCurrentState.DISARMED
+        );
+        this.targetChar.updateValue(
+          info.in_alarm
+            ? this.Characteristic.SecuritySystemTargetState.AWAY_ARM
+            : this.Characteristic.SecuritySystemTargetState.DISARM
+        );
+      } catch (e: any) {
+        this.log.debug('Failed to update Hub characteristics:', e.message);
+      }
+    });
   }
 
   private async setAlarmEnabled(value: boolean) {

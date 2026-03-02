@@ -6,7 +6,7 @@ import Saturation from './characteristics/Saturation';
 import Hue from './characteristics/Hue';
 import On from './characteristics/On';
 
-import { HOME_KIT_VALUES } from '../../utils/translateColorTemp';
+import { HOME_KIT_VALUES, toHomeKitValues, TP_LINK_VALUES } from '../../utils/translateColorTemp';
 import DeviceInfo from '../../api/@types/DeviceInfo';
 import Accessory from '../../@types/Accessory';
 import Context from '../../@types/Context';
@@ -130,6 +130,48 @@ export default class LightBulbAccessory extends Accessory {
 
       this.accessory.configureController(adaptiveLightingController);
     }
+
+    // Start background polling to keep cache warm and push updates to HomeKit
+    this.tpLink.startPolling((info: DeviceInfo) => {
+      try {
+        this.service.updateCharacteristic(
+          this.platform.Characteristic.On,
+          info.device_on || false
+        );
+
+        if (hasBrightness) {
+          this.service.updateCharacteristic(
+            this.platform.Characteristic.Brightness,
+            info.brightness || 100
+          );
+        }
+
+        if (hasColors) {
+          this.service.updateCharacteristic(
+            this.platform.Characteristic.Hue,
+            info.hue || 0
+          );
+          this.service.updateCharacteristic(
+            this.platform.Characteristic.Saturation,
+            info.saturation || 0
+          );
+        }
+
+        if (hasColors && !isColorTemperatureBlocked) {
+          const colorTemp = toHomeKitValues(info.color_temp || TP_LINK_VALUES.min);
+          const clampedTemp = Math.min(
+            HOME_KIT_VALUES.max,
+            Math.max(HOME_KIT_VALUES.min, colorTemp)
+          );
+          this.service.updateCharacteristic(
+            this.platform.Characteristic.ColorTemperature,
+            clampedTemp
+          );
+        }
+      } catch (e: any) {
+        this.log.debug('Failed to update LightBulb characteristics:', e.message);
+      }
+    });
   }
 
   private async updateHueAndSat() {

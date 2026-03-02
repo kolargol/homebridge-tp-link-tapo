@@ -17,6 +17,7 @@ export type AccessoryThisType = ThisType<{
 
 export default class LightBulbAccessory extends Accessory {
   private readonly service: Service;
+  private hasInUse = false;
 
   public get UUID() {
     return this.accessory.UUID.toString();
@@ -73,6 +74,7 @@ export default class LightBulbAccessory extends Accessory {
         )
       ).onGet(InUse.get.bind(this));
 
+      this.hasInUse = true;
       this.log.debug('InUse characteristic supported.');
     } catch {
       this.log.debug('InUse characteristic not supported, ignoring.');
@@ -81,5 +83,17 @@ export default class LightBulbAccessory extends Accessory {
         this.service.removeCharacteristic(current);
       }
     }
+
+    // Start background polling to keep cache warm and push updates to HomeKit
+    this.tpLink.startPolling((info: DeviceInfo) => {
+      try {
+        this.service.updateCharacteristic(
+          this.platform.Characteristic.On,
+          info.device_on || false
+        );
+      } catch (e: any) {
+        this.log.debug('Failed to update Outlet characteristics:', e.message);
+      }
+    });
   }
 }

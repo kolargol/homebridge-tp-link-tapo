@@ -19,7 +19,7 @@ const characteristic: {
   set: CharacteristicSetHandler;
 } & AccessoryThisType = {
   get: async function (): Promise<Nullable<CharacteristicValue>> {
-    const deviceInfo = await this.tpLink.getInfo();
+    const deviceInfo = this.tpLink.getCachedInfo() ?? await this.tpLink.getInfo();
     const value = toHomeKitValues(deviceInfo.color_temp || TP_LINK_VALUES.min);
 
     if (value < HOME_KIT_VALUES.min) {

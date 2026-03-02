@@ -19,6 +19,10 @@ type Command = keyof Commands;
 type CommandReturnType<T extends Command> = ReturnType<Commands[T]>;
 
 export default class TPLink {
+  private static readonly INFO_CACHE_TTL = 30000; // 30 seconds
+  private static readonly COMMAND_CACHE_TTL = 30000; // 30 seconds
+  private static readonly DEFAULT_POLL_INTERVAL = 15000; // 15 seconds
+
   public get protocol(): Protocol {
     return this._protocol;
   }
@@ -35,6 +39,9 @@ export default class TPLink {
 
   private _prevPowerState = false;
   private _unsentData: any = {};
+
+  private pollTimer?: ReturnType<typeof setInterval>;
+  private pollCallbacks: Array<(info: DeviceInfo) => void> = [];
 
   private commandCache: Record<
     string,
@@ -61,7 +68,8 @@ export default class TPLink {
     private readonly ip: string,
     private readonly email: string,
     private readonly password: string,
-    private readonly log: Logger
+    private readonly log: Logger,
+    private readonly pollInterval: number = TPLink.DEFAULT_POLL_INTERVAL
   ) {
     this.lock = new AsyncLock();
     this.api = new LegacyAPI(ip, email, password, log);
@@ -89,6 +97,65 @@ export default class TPLink {
     return this;
   }
 
+  /**
+   * Returns the last cached DeviceInfo without making any network call or acquiring locks.
+   * Returns null if no info has been fetched yet.
+   */
+  public getCachedInfo(): DeviceInfo | null {
+    return this.infoCache?.data ?? null;
+  }
+
+  /**
+   * Start background polling to keep the device info cache warm.
+   * GET handlers can then use getCachedInfo() for instant responses.
+   * @param onUpdate callback invoked after each successful poll with fresh DeviceInfo
+   */
+  public startPolling(onUpdate?: (info: DeviceInfo) => void): void {
+    if (onUpdate) {
+      this.pollCallbacks.push(onUpdate);
+    }
+
+    if (this.pollTimer) {
+      return; // already polling
+    }
+
+    this.pollTimer = setInterval(async () => {
+      try {
+        // Bypass the long-TTL cache by calling the network directly
+        const deviceInfo = await this.lock.acquire('get-info-cache', async () => {
+          const info = (await this.sendCommand('deviceInfo')) ?? {};
+          this.infoCache = {
+            data: info,
+            setAt: Date.now()
+          };
+          this._prevPowerState = info.device_on ?? false;
+          return info;
+        });
+
+        for (const cb of this.pollCallbacks) {
+          try {
+            cb(deviceInfo);
+          } catch (e: any) {
+            this.log.debug('Poll callback error:', e.message);
+          }
+        }
+      } catch (e: any) {
+        this.log.debug('Polling error for', this.ip, ':', e.message);
+      }
+    }, this.pollInterval);
+  }
+
+  /**
+   * Stop background polling.
+   */
+  public stopPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = undefined;
+    }
+    this.pollCallbacks = [];
+  }
+
   public async cacheSendCommand<T extends Command>(
     deviceId: string,
     command: T,
@@ -100,7 +167,7 @@ export default class TPLink {
       async () => {
         if (
           this.commandCache[cacheKey.toString()] &&
-          Date.now() - this.commandCache[cacheKey.toString()].setAt < 100
+          Date.now() - this.commandCache[cacheKey.toString()].setAt < TPLink.COMMAND_CACHE_TTL
         ) {
           return this.commandCache[cacheKey.toString()].data;
         }
@@ -118,7 +185,7 @@ export default class TPLink {
 
   public async getInfo(): Promise<DeviceInfo> {
     return this.lock.acquire('get-info-cache', async () => {
-      if (this.infoCache && Date.now() - this.infoCache.setAt < 100) {
+      if (this.infoCache && Date.now() - this.infoCache.setAt < TPLink.INFO_CACHE_TTL) {
         return this.infoCache.data;
       }
 
